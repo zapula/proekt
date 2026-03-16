@@ -21,7 +21,7 @@ export default class SceneErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('3D scene error:', error, info);
+    console.error('Ошибка 3D-сцены:', error, info);
   }
 
   componentDidUpdate(prevProps: SceneErrorBoundaryProps) {

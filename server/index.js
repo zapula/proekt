@@ -60,7 +60,7 @@ const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
   database: process.env.DB_NAME || 'atlas_fauna',
   password: process.env.DB_PASSWORD || 'bonaqua',
-  port: Number(process.env.DB_PORT || 5432),
+  port: Number(process.env.DB_PORT || 5433),
 });
 
 // === MIDDLEWARE ===
@@ -75,7 +75,7 @@ const corsOptions = {
       return callback(null, true);
     }
     logger.warn({ event: 'security.cors_blocked', origin });
-    return callback(new Error('Origin is not allowed by CORS'));
+    return callback(new Error('Источник запроса не разрешён политикой CORS.'));
   },
   credentials: true
 };
@@ -89,7 +89,7 @@ app.use(express.urlencoded({ extended: true }));
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
-  message: 'Слишком много запросов, попробуйте позже',
+  message: 'Слишком много действий подряд. Подождите немного и попробуйте снова.',
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -105,12 +105,15 @@ const authLimiter = rateLimit({
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
-  message: 'Слишком много попыток загрузки файлов, попробуйте позже',
+  message: 'Слишком много загрузок подряд. Подождите немного и попробуйте снова.',
   standardHeaders: true,
   legacyHeaders: false
 });
 
 app.use('/api/', apiLimiter);
+
+const MAX_IMAGE_UPLOAD_BYTES = 2 * 1024 * 1024;
+const MAX_MODEL_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 const animalSchema = z.object({
   name: z.string().min(1).max(100),
@@ -381,12 +384,12 @@ const makeUploader = ({ dirPath, fileFilter, fileSize }) => multer({
 const uploadIcon = makeUploader({
   dirPath: iconsDir,
   fileFilter: iconFileFilter,
-  fileSize: 10 * 1024 * 1024
+  fileSize: MAX_IMAGE_UPLOAD_BYTES
 });
 const uploadModel = makeUploader({
   dirPath: modelsDir,
   fileFilter: modelFileFilter,
-  fileSize: 200 * 1024 * 1024
+  fileSize: MAX_MODEL_UPLOAD_BYTES
 });
 const uploadPhotos = multer({
   storage: multer.diskStorage({
@@ -405,7 +408,7 @@ const uploadPhotos = multer({
       cb(null, unique);
     }
   }),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES },
   fileFilter: imageFileFilter
 });
 
@@ -425,7 +428,7 @@ const uploadSpeciesPhotos = multer({
       cb(null, unique);
     }
   }),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES },
   fileFilter: imageFileFilter
 });
 
@@ -1015,7 +1018,7 @@ app.get('/api/favorites', authenticateToken, async (req, res) => {
   try {
     const userId = Number(req.user.id);
     if (!Number.isFinite(userId)) {
-      return res.status(400).json({ error: 'Некорректный userId в токене' });
+      return res.status(400).json({ error: 'Некорректный идентификатор пользователя в токене' });
     }
 
     const result = await pool.query(
@@ -1024,7 +1027,7 @@ app.get('/api/favorites', authenticateToken, async (req, res) => {
     );
     res.json(result.rows);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch favorites' });
+    res.status(500).json({ error: 'Не удалось загрузить избранное' });
   }
 });
 
@@ -1037,7 +1040,7 @@ app.post('/api/favorites', authenticateToken, async (req, res) => {
 
     const userId = Number(req.user.id);
     if (!Number.isFinite(userId)) {
-      return res.status(400).json({ error: 'Некорректный userId в токене' });
+      return res.status(400).json({ error: 'Некорректный идентификатор пользователя в токене' });
     }
 
     const { animalId } = parsed.data;
@@ -1047,7 +1050,7 @@ app.post('/api/favorites', authenticateToken, async (req, res) => {
     );
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to add favorite' });
+    res.status(500).json({ error: 'Не удалось добавить в избранное' });
   }
 });
 
@@ -1065,7 +1068,7 @@ app.delete('/api/favorites/:animalId', authenticateToken, async (req, res) => {
     );
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to remove favorite' });
+    res.status(500).json({ error: 'Не удалось удалить из избранного' });
   }
 });
 
@@ -1076,7 +1079,7 @@ app.delete('/api/favorites/:animalId', authenticateToken, async (req, res) => {
 app.get('/api/progress', authenticateToken, async (req, res) => {
   const userId = Number(req.user.id);
   if (!Number.isFinite(userId)) {
-    return res.status(400).json({ error: 'Некорректный userId в токене' });
+    return res.status(400).json({ error: 'Некорректный идентификатор пользователя в токене' });
   }
   try {
     const result = await pool.query('SELECT * FROM user_progress WHERE user_id = $1', [userId]);
@@ -1092,7 +1095,7 @@ app.post('/api/progress', authenticateToken, async (req, res) => {
 
   const userId = Number(req.user.id);
   if (!Number.isFinite(userId)) {
-    return res.status(400).json({ error: 'Некорректный userId в токене' });
+    return res.status(400).json({ error: 'Некорректный идентификатор пользователя в токене' });
   }
 
   const {
@@ -1124,7 +1127,7 @@ app.post('/api/action', authenticateToken, async (req, res) => {
 
   const userId = Number(req.user.id);
   if (!Number.isFinite(userId)) {
-    return res.status(400).json({ error: 'Некорректный userId в токене' });
+    return res.status(400).json({ error: 'Некорректный идентификатор пользователя в токене' });
   }
 
   const { type } = parsed.data;
@@ -1152,7 +1155,7 @@ app.post('/api/action', authenticateToken, async (req, res) => {
 app.get('/api/profile-full', authenticateToken, async (req, res) => {
   const userId = Number(req.user.id);
   if (!Number.isFinite(userId)) {
-    return res.status(400).json({ error: 'Некорректный userId в токене' });
+    return res.status(400).json({ error: 'Некорректный идентификатор пользователя в токене' });
   }
 
   try {
@@ -1235,13 +1238,18 @@ app.get('/api/profile-full', authenticateToken, async (req, res) => {
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: 'Файл превышает допустимый размер.' });
+      const isModelUpload = req.path.includes('/model');
+      return res.status(400).json({
+        error: isModelUpload
+          ? '3D-модель превышает допустимый размер (10 МБ).'
+          : 'Изображение превышает допустимый размер (2 МБ).'
+      });
     }
     return res.status(400).json({ error: `Ошибка загрузки файла: ${err.message}` });
   }
 
-  if (err?.message === 'Origin is not allowed by CORS') {
-    return res.status(403).json({ error: 'Источник запроса не разрешен политикой CORS.' });
+  if (err?.message === 'Источник запроса не разрешён политикой CORS.') {
+    return res.status(403).json({ error: 'Источник запроса не разрешён политикой CORS.' });
   }
 
   if (typeof err?.message === 'string') {

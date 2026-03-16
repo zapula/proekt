@@ -126,7 +126,7 @@ export const useVoice = ({ wikiText, onVoiceAction }: UseVoiceParams) => {
 
     if (!selectedVoice) {
       selectedVoice = availableVoices[0];
-      setVoiceError('Русский голос не найден. Использую default.');
+      setVoiceError('Русский голос не найден. Использую голос по умолчанию.');
     }
 
     let isInterrupted = false;

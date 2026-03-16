@@ -1,4 +1,4 @@
-// src/App.tsx
+﻿// src/App.tsx
 import { lazy, Suspense, useCallback, useState, useMemo, useEffect, useRef } from 'react';
 import { toast, Toaster } from 'react-hot-toast';
 import confetti from 'canvas-confetti';
@@ -42,6 +42,12 @@ import {
 } from './constants/map';
 import { createAuthHeaders } from './utils/auth';
 import { apiUrl } from './utils/api';
+import {
+  ADMIN_SESSION_EXPIRED_MESSAGE,
+  createApiRequestError,
+  getApiRequestErrorMessage,
+  isAdminSessionExpiredError
+} from './utils/apiErrors';
 import { fetchWithRetry } from './utils/fetchWithRetry';
 import { normalizeModelUrl, pickPreferredModelUrl, toFolderName } from './utils/speciesUtils';
 import './App.css';
@@ -74,7 +80,7 @@ const AboutPage = lazy(() => import('./components/AboutPage'));
 const SearchPanel = lazy(() => import('./components/SearchPanel'));
 function App() {
   // ============================================
-  // ДАННЫЕ
+  // Р”РђРќРќР«Р•
   // ============================================
   const { mapAnimals, setMapAnimals, speciesList, setSpeciesList, isDataLoading, dataLoadError, fetchData } = useMapSpeciesData();
   const [isWikiLoading, setIsWikiLoading] = useState(false);
@@ -280,6 +286,57 @@ function App() {
   const [modelAdultFile, setModelAdultFile] = useState<File | null>(null);
   const [isModelUploading, setIsModelUploading] = useState(false);
   const [modelUploadError, setModelUploadError] = useState<string | null>(null);
+  const adminSessionNoticeAtRef = useRef(0);
+
+  const handleAdminSessionExpired = useCallback(() => {
+    const now = Date.now();
+    setUser(null);
+    setIsAdminMode(false);
+    setIsHaloEditorOpen(false);
+    setHaloEditorLocationId(null);
+    setIsSpeciesCreatorOpen(false);
+    setPlaceLocationCoords(null);
+    setIsAuthOpen(true);
+
+    if (now - adminSessionNoticeAtRef.current > 4000) {
+      adminSessionNoticeAtRef.current = now;
+      toast.error(ADMIN_SESSION_EXPIRED_MESSAGE);
+    }
+  }, [
+    setIsAdminMode,
+    setIsAuthOpen,
+    setIsHaloEditorOpen,
+    setHaloEditorLocationId,
+    setIsSpeciesCreatorOpen,
+    setPlaceLocationCoords,
+    setUser
+  ]);
+
+  const handleAdminRequestError = useCallback(
+    (
+      error: unknown,
+      fallbackMessage: string,
+      options?: {
+        setInlineError?: (message: string) => void;
+        showToast?: boolean;
+      }
+    ) => {
+      const isExpiredSession = isAdminSessionExpiredError(error);
+      const message = isExpiredSession
+        ? ADMIN_SESSION_EXPIRED_MESSAGE
+        : getApiRequestErrorMessage(error, fallbackMessage);
+
+      if (isExpiredSession) {
+        handleAdminSessionExpired();
+      } else if (options?.showToast ?? !options?.setInlineError) {
+        toast.error(message);
+      }
+
+      options?.setInlineError?.(message);
+      return message;
+    },
+    [handleAdminSessionExpired]
+  );
 
   const selectedModelUrl = useMemo(() => {
     if (!selectedAnimal) return '';
@@ -317,7 +374,8 @@ function App() {
     onAnimalMetaUpdate: ({ photoCount, imageFolder }) => {
       setSelectedAnimal((prev) => (prev ? { ...prev, photoCount, imageFolder } : prev));
     },
-    refreshMapData: fetchData
+    refreshMapData: fetchData,
+    onAuthorizationExpired: handleAdminSessionExpired
   });
 
   const { toggleFavorite, isFavorite } = useFavorites(user);
@@ -453,13 +511,13 @@ function App() {
 
   /**
    * Создает новую точку вида на карте.
-   * @param speciesId ID вида.
+   * @param speciesId ID РІРёРґР°.
    * @param coords Координаты [lat, lng].
    * @returns true если локация создана, иначе false.
    */
   const createLocation = useCallback(async (speciesId: number, coords: number[]) => {
     if (!hasAuthSession) {
-      toast.error('Нужна авторизация администратора');
+      toast.error('Требуется авторизация администратора');
       return false;
     }
 
@@ -473,18 +531,20 @@ function App() {
           lng: coords[1]
         })
       });
-      if (res.ok) {
-        toast.success("Точка успешно добавлена на карту!", { icon: '📍' });
-        setPlaceLocationCoords(null);
-        void fetchData();
-        return true;
+
+      if (!res.ok) {
+        throw await createApiRequestError(res, 'Не удалось добавить точку на карту.');
       }
-      throw new Error();
-    } catch (e) {
-      toast.error("Ошибка сохранения");
+
+      toast.success('Точка успешно добавлена на карту!', { icon: '📍' });
+      setPlaceLocationCoords(null);
+      void fetchData();
+      return true;
+    } catch (error) {
+      handleAdminRequestError(error, 'Не удалось добавить точку на карту.');
       return false;
     }
-  }, [hasAuthSession, fetchData]);
+  }, [fetchData, handleAdminRequestError, hasAuthSession, setPlaceLocationCoords]);
 
   const handleSaveLocation = useCallback(async () => {
     if (!placeLocationCoords) {
@@ -500,7 +560,7 @@ function App() {
 
   const handleDragEnd = useCallback(async (e: any, locationId: number) => {
     if (!hasAuthSession) {
-      toast.error('Нужна авторизация администратора');
+      toast.error('Требуется авторизация администратора');
       return;
     }
 
@@ -514,24 +574,24 @@ function App() {
         body: JSON.stringify({ lat: newLat, lng: newLng })
       });
 
-      if (res.ok) {
-        toast.success('Метка перемещена!', { icon: '📍' });
-        setMapAnimals(prev => prev.map(a => 
-          a.locationId === locationId ? { ...a, coordinates: [newLat, newLng] } : a
-        ));
-      } else {
-        throw new Error();
+      if (!res.ok) {
+        throw await createApiRequestError(res, 'Не удалось переместить метку.');
       }
-    } catch (err) {
-      toast.error('Не удалось переместить метку');
-      void fetchData(); 
+
+      toast.success('Метка перемещена!', { icon: '📍' });
+      setMapAnimals((prev) => prev.map((animal) =>
+        animal.locationId === locationId ? { ...animal, coordinates: [newLat, newLng] } : animal
+      ));
+    } catch (error) {
+      handleAdminRequestError(error, 'Не удалось переместить метку.');
+      void fetchData();
     }
-  }, [hasAuthSession, fetchData]);
+  }, [fetchData, handleAdminRequestError, hasAuthSession, setMapAnimals]);
 
   const handleDeleteLocation = useCallback(async () => {
     if (!selectedAnimal) return;
     if (!hasAuthSession) {
-      toast.error('Нужна авторизация администратора');
+      toast.error('Требуется авторизация администратора');
       return;
     }
     const confirmDelete = window.confirm(`Вы уверены, что хотите удалить эту точку (${selectedAnimal.name})?`);
@@ -543,17 +603,17 @@ function App() {
         headers: createAuthHeaders()
       });
 
-      if (res.ok) {
-        toast.success('Точка удалена', { icon: '🗑️' });
-        setSelectedAnimal(null); 
-        void fetchData(); 
-      } else {
-        throw new Error();
+      if (!res.ok) {
+        throw await createApiRequestError(res, 'Не удалось удалить точку.');
       }
-    } catch (err) {
-      toast.error('Ошибка при удалении');
+
+      toast.success('Точка удалена', { icon: '🗑️' });
+      setSelectedAnimal(null);
+      void fetchData();
+    } catch (error) {
+      handleAdminRequestError(error, 'Не удалось удалить точку.');
     }
-  }, [hasAuthSession, fetchData, selectedAnimal, setSelectedAnimal]);
+  }, [fetchData, handleAdminRequestError, hasAuthSession, selectedAnimal, setSelectedAnimal]);
 
   const uploadFile = async (url: string, file: File) => {
     if (!hasAuthSession) {
@@ -566,7 +626,9 @@ function App() {
       headers: createAuthHeaders(),
       body: form
     });
-    if (!res.ok) throw new Error('upload_failed');
+    if (!res.ok) {
+      throw await createApiRequestError(res, 'Ошибка загрузки файла.');
+    }
     return res.json();
   };
 
@@ -582,7 +644,9 @@ function App() {
       headers: createAuthHeaders(),
       body: form
     });
-    if (!res.ok) throw new Error('upload_failed');
+    if (!res.ok) {
+      throw await createApiRequestError(res, 'Ошибка загрузки фото.');
+    }
     return res.json();
   };
 
@@ -598,7 +662,7 @@ function App() {
       isRedBook: newSpeciesForm.isRedBook
     });
     if (!baseValidation.success) {
-      setSpeciesFormError(baseValidation.error.issues[0]?.message || 'Проверьте введенные данные');
+      setSpeciesFormError(baseValidation.error.issues[0]?.message || 'Проверьте введённые данные');
       return;
     }
 
@@ -628,14 +692,16 @@ function App() {
       const checkRes = await fetchWithRetry(apiUrl(`/api/uploads/check?name=${encodeURIComponent(newSpeciesForm.name)}&folder=${encodeURIComponent(folderInput)}`), {
         headers: createAuthHeaders()
       });
-      if (!checkRes.ok) throw new Error('check_failed');
+      if (!checkRes.ok) {
+        throw await createApiRequestError(checkRes, 'Не удалось проверить название вида.');
+      }
       const check = await checkRes.json();
       if (check.nameExists) {
         setSpeciesFormError('Такой вид уже существует. Измените название.');
         return;
       }
       if (check.folderExists && check.folderUsedBySpecies) {
-        setSpeciesFormError('Photo folder is already used by another species. Choose another folder name.');
+        setSpeciesFormError('Папка с фото уже используется другим видом. Укажите другое имя папки.');
         return;
       }
 
@@ -657,33 +723,37 @@ function App() {
         headers: createAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload)
       });
-      if (res.ok) {
-        const created = await res.json();
-        toast.success(`Вид "${newSpeciesForm.name}" создан!`, { icon: '✨' });
-        setIsSpeciesCreatorOpen(false);
-        let didCreateLocation = false;
-        if (created?.id) {
-          setSelectedSpeciesId(String(created.id));
-          if (placeLocationCoords) {
-            didCreateLocation = await createLocation(created.id, placeLocationCoords);
-          } else {
-            toast('Вид создан. Кликните на карту и нажмите "Поставить".', { icon: '📌' });
-          }
-        }
-        setNewSpeciesForm({ name: '', category: 'mammal', diet: 'herbivore', isRedBook: false, imageFolder: '' });
-        setIsFolderTouched(false);
-        setIconFile(null);
-        setPhotoFiles([]);
-        if (!didCreateLocation) void fetchData();
-      } else {
-        throw new Error('create_failed');
+      if (!res.ok) {
+        throw await createApiRequestError(res, 'Не удалось создать вид.');
       }
-    } catch (e) { toast.error("Ошибка создания вида"); }
-    finally { setIsSpeciesSaving(false); }
+
+      const created = await res.json();
+      toast.success(`Вид "${newSpeciesForm.name}" создан!`, { icon: '✨' });
+      setIsSpeciesCreatorOpen(false);
+      let didCreateLocation = false;
+      if (created?.id) {
+        setSelectedSpeciesId(String(created.id));
+        if (placeLocationCoords) {
+          didCreateLocation = await createLocation(created.id, placeLocationCoords);
+        } else {
+          toast('Вид создан. Кликните на карту и нажмите "Поставить".', { icon: '📌' });
+        }
+      }
+      setNewSpeciesForm({ name: '', category: 'mammal', diet: 'herbivore', isRedBook: false, imageFolder: '' });
+      setIsFolderTouched(false);
+      setIconFile(null);
+      setPhotoFiles([]);
+      if (!didCreateLocation) void fetchData();
+    } catch (error) {
+      handleAdminRequestError(error, 'Не удалось создать вид.', { setInlineError: setSpeciesFormError });
+    } finally {
+      setIsSpeciesSaving(false);
+    }
   }, [
-    hasAuthSession,
     createLocation,
     fetchData,
+    handleAdminRequestError,
+    hasAuthSession,
     iconFile,
     isSpeciesSaving,
     newSpeciesForm,
@@ -696,9 +766,10 @@ function App() {
     setNewSpeciesForm,
     setPhotoFiles,
     setSelectedSpeciesId,
-    setSpeciesFormError
+    setSpeciesFormError,
+    uploadFile,
+    uploadPhotos
   ]);
-
   // --- СОХРАНЕНИЕ ВИКИ ---
   const handleSaveWiki = useCallback(async () => {
     if (!selectedAnimal) return;
@@ -726,23 +797,21 @@ function App() {
           size: validation.data.size,
           trait: validation.data.trait,
           category: selectedAnimal.category,
-          diet: selectedAnimal.diet 
+          diet: selectedAnimal.diet
         })
       });
 
-      if (res.ok) {
-        setIsEditingWiki(false);
-        toast.success('Энциклопедия обновлена!');
-      } else {
-        console.error('Сервер вернул ошибку:', res.status);
-        toast.error('Ошибка на сервере при сохранении');
+      if (!res.ok) {
+        throw await createApiRequestError(res, 'Ошибка сохранения энциклопедии.');
       }
 
-    } catch (e) {
-      console.error('Ошибка сети при сохранении:', e);
-      toast.error('Ошибка сохранения');
+      setIsEditingWiki(false);
+      toast.success('Энциклопедия обновлена!');
+    } catch (error) {
+      console.error('Ошибка сохранения энциклопедии:', error);
+      handleAdminRequestError(error, 'Ошибка сохранения энциклопедии.');
     }
-  }, [hasAuthSession, selectedAnimal, wikiData]);
+  }, [handleAdminRequestError, hasAuthSession, selectedAnimal, wikiData]);
 
   // ============================================
   // ОБРАБОТЧИКИ - ТАМАГОЧИ
@@ -826,7 +895,11 @@ function App() {
   };
 
   const uploadSpeciesModel = async (type: 'child' | 'adult', file: File) => {
-    if (!selectedAnimal || !hasAuthSession) return;
+    if (!selectedAnimal) return;
+    if (!hasAuthSession) {
+      setModelUploadError('Требуется авторизация администратора.');
+      return;
+    }
     setModelUploadError(null);
     setIsModelUploading(true);
     try {
@@ -837,7 +910,9 @@ function App() {
         headers: createAuthHeaders(),
         body: form
       });
-      if (!res.ok) throw new Error('upload_failed');
+      if (!res.ok) {
+        throw await createApiRequestError(res, 'Ошибка загрузки модели.');
+      }
       const data = await res.json();
       setSelectedAnimal((prev) => {
         if (!prev) return prev;
@@ -846,15 +921,19 @@ function App() {
       });
       void fetchData();
       toast.success(type === 'child' ? 'Модель детёныша загружена' : 'Модель взрослого загружена');
-    } catch (e) {
-      setModelUploadError('Ошибка загрузки модели.');
+    } catch (error) {
+      handleAdminRequestError(error, 'Ошибка загрузки модели.', { setInlineError: setModelUploadError });
     } finally {
       setIsModelUploading(false);
     }
   };
 
   const clearSpeciesModel = async (type: 'child' | 'adult') => {
-    if (!selectedAnimal || !hasAuthSession) return;
+    if (!selectedAnimal) return;
+    if (!hasAuthSession) {
+      setModelUploadError('Требуется авторизация администратора.');
+      return;
+    }
     setModelUploadError(null);
     setIsModelUploading(true);
     try {
@@ -862,7 +941,9 @@ function App() {
         method: 'DELETE',
         headers: createAuthHeaders()
       });
-      if (!res.ok) throw new Error('clear_failed');
+      if (!res.ok) {
+        throw await createApiRequestError(res, 'Ошибка очистки модели.');
+      }
       setSelectedAnimal((prev) => {
         if (!prev) return prev;
         if (type === 'child') return { ...prev, modelUrlChild: '' };
@@ -870,8 +951,8 @@ function App() {
       });
       void fetchData();
       toast.success(type === 'child' ? 'Модель детёныша очищена' : 'Модель взрослого очищена');
-    } catch (e) {
-      setModelUploadError('Ошибка очистки модели.');
+    } catch (error) {
+      handleAdminRequestError(error, 'Ошибка очистки модели.', { setInlineError: setModelUploadError });
     } finally {
       setIsModelUploading(false);
     }
@@ -1008,7 +1089,7 @@ function App() {
     link.download = `animals-${selectedRegion}.csv`;
     link.click();
     URL.revokeObjectURL(url);
-    toast.success('CSV экспортирован');
+    toast.success('CSV-файл экспортирован');
   }, [regionFilteredAnimals, selectedRegion]);
 
   const regionSelectorRegions = useMemo<RegionSelectorDetails[]>(() => {
@@ -1128,7 +1209,7 @@ function App() {
   }, [isLandingOpen, mapAnimals, speciesList]);
 
   // ============================================
-  // ОБРАБОТЧИКИ - LANDING
+  // ОБРАБОТЧИКИ - ЛЕНДИНГ
   // ============================================
   const navigateToPage = useCallback((nextPage: AppPage, historyMode: 'push' | 'replace' = 'push') => {
     if (typeof window !== 'undefined') {
@@ -1298,7 +1379,7 @@ function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`marker_halo_save_failed_${response.status}`);
+        throw await createApiRequestError(response, 'Не удалось сохранить радиус ореола.');
       }
 
       const data = await response.json();
@@ -1351,7 +1432,7 @@ function App() {
 
       const targetAnimal = mapAnimals.find((animal) => animal.locationId === locationId);
       if (!targetAnimal) {
-        toast.error('Failed to find marker for halo save.');
+        toast.error('Не удалось найти метку для сохранения ореола.');
         return;
       }
 
@@ -1362,10 +1443,10 @@ function App() {
           targetAnimal.markerHaloRadius == null ? null : clampAnimalMarkerHaloRadius(targetAnimal.markerHaloRadius);
         await persistMarkerHaloRadiusForLocation(locationId, localRadius);
         clearMarkerHaloDirty(locationId);
-        toast.success('Halo radius saved');
+        toast.success('Радиус ореола сохранён');
       } catch (error) {
-        console.error('Halo radius save failed:', error);
-        toast.error('Failed to save halo radius on server.');
+        console.error('Не удалось сохранить радиус ореола:', error);
+        handleAdminRequestError(error, 'Не удалось сохранить радиус ореола.');
         void fetchData();
       } finally {
         setSavingMarkerHaloLocationIds((prev) => {
@@ -1376,7 +1457,7 @@ function App() {
         });
       }
     },
-    [clearMarkerHaloDirty, fetchData, mapAnimals, persistMarkerHaloRadiusForLocation, savingMarkerHaloLocationIds]
+    [clearMarkerHaloDirty, fetchData, handleAdminRequestError, mapAnimals, persistMarkerHaloRadiusForLocation, savingMarkerHaloLocationIds]
   );
 
   const handleChangeRegion = useCallback(() => {
@@ -1405,7 +1486,7 @@ function App() {
         body: JSON.stringify({ is_red_book: nextValue })
       });
       if (!res.ok) {
-        throw new Error('red_book_update_failed');
+        throw await createApiRequestError(res, 'Не удалось обновить статус Красной книги.');
       }
 
       setSelectedAnimal((prev) => (prev ? { ...prev, isRedBook: nextValue } : prev));
@@ -1417,9 +1498,9 @@ function App() {
       );
       toast.success(nextValue ? 'Вид добавлен в Красную книгу' : 'Вид снят с отметки Красной книги');
     } catch (error) {
-      toast.error('Не удалось обновить статус Красной книги');
+      handleAdminRequestError(error, 'Не удалось обновить статус Красной книги.');
     }
-  }, [hasAuthSession, isAdminMode, selectedAnimal, setSelectedAnimal]);
+  }, [handleAdminRequestError, hasAuthSession, isAdminMode, selectedAnimal, setMapAnimals, setSelectedAnimal, setSpeciesList]);
   const handleCloseAnimalCard = useCallback(() => {
     setSelectedAnimal(null);
   }, [setSelectedAnimal]);
@@ -1519,7 +1600,7 @@ function App() {
       setHaloEditorLocationId(null);
     }
     if (newMode) {
-      toast("Режим Админа: Перетаскивайте метки!", { icon: '🛠️' });
+      toast('Режим администратора: перетаскивайте метки!', { icon: '🛠️' });
     }
   }, [isAdminMode, setIsAdminMode, setSelectedAnimal, user]);
 
@@ -1713,7 +1794,7 @@ function App() {
         </>
       )}
 
-      {/* === БОЛЬШАЯ КАРТОЧКА ЖИВОТНОГО (MODAL) === */}
+      {/* === БОЛЬШАЯ КАРТОЧКА ЖИВОТНОГО (МОДАЛЬНОЕ ОКНО) === */}
       {isHomePage && selectedAnimal && (
         <Suspense fallback={<LoadingSpinner label={isWikiLoading ? 'Загрузка энциклопедии...' : 'Загрузка карточки...'} />}>
           <AnimalCard
@@ -1777,3 +1858,7 @@ function App() {
 }
 
 export default App;
+
+
+
+

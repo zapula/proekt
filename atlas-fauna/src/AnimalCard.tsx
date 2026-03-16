@@ -1,12 +1,17 @@
 import { lazy, memo, Suspense, useEffect, useRef, type ChangeEvent, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { toast } from 'react-hot-toast';
 import type { DietType, IAnimal } from './animals';
+import {
+  IMAGE_UPLOAD_TOO_LARGE_MESSAGE,
+  MAX_IMAGE_UPLOAD_SIZE_BYTES,
+  MAX_MODEL_UPLOAD_SIZE_BYTES,
+  MODEL_UPLOAD_TOO_LARGE_MESSAGE
+} from './constants/upload';
 import { Tab, type User, type WikiData } from './types';
 import AnimalScene from './AnimalScene';
 import SceneErrorBoundary from './SceneErrorBoundary';
 
 const PhotoGallery = lazy(() => import('./PhotoGallery'));
-const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 
 interface FoodInfo {
   icon: string;
@@ -129,8 +134,8 @@ function AnimalCard({
     setModelFile: (file: File | null) => void
   ) => {
     const file = event.target.files?.[0] || null;
-    if (file && file.size > MAX_UPLOAD_SIZE_BYTES) {
-      toast.error('Файл слишком большой (макс. 200MB)');
+    if (file && file.size > MAX_MODEL_UPLOAD_SIZE_BYTES) {
+      toast.error(MODEL_UPLOAD_TOO_LARGE_MESSAGE);
       setModelFile(null);
       event.target.value = '';
       return;
@@ -201,9 +206,9 @@ function AnimalCard({
                     border: '1px solid rgba(0,0,0,0.1)'
                   }}
                 />
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>Model is not uploaded</div>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>3D-модель не загружена</div>
                 <div style={{ fontSize: 13, color: '#555', textAlign: 'center', maxWidth: 260 }}>
-                  Upload a GLB model in admin mode
+                  Загрузите GLB-модель в режиме администратора
                 </div>
               </div>
             )}
@@ -473,7 +478,7 @@ function AnimalCard({
                       onClick={onTakePhoto}
                       style={{ width: '100%', padding: '18px', fontSize: '18px', background: '#ff9800', color: 'white' }}
                     >
-                      📸 Сделать фото для отчета
+                      📸 Сделать фото для отчёта
                     </button>
                   ) : (
                     <button
@@ -625,7 +630,15 @@ function AnimalCard({
                       accept="image/*"
                       multiple
                       onChange={(e) => {
-                        setGalleryUploadFiles(Array.from(e.target.files || []));
+                        const files = Array.from(e.target.files || []);
+                        const hasOversizedFile = files.some((file) => file.size > MAX_IMAGE_UPLOAD_SIZE_BYTES);
+                        if (hasOversizedFile) {
+                          toast.error(IMAGE_UPLOAD_TOO_LARGE_MESSAGE);
+                          setGalleryUploadFiles([]);
+                          e.target.value = '';
+                          return;
+                        }
+                        setGalleryUploadFiles(files);
                         setGalleryUploadError(null);
                       }}
                     />
@@ -656,7 +669,7 @@ function AnimalCard({
                               }}
                               title="Убрать фото"
                             >
-                              ×
+                              Г—
                             </button>
                           </div>
                         ))}
@@ -692,6 +705,8 @@ function AnimalCard({
 }
 
 export default memo(AnimalCard);
+
+
 
 
 

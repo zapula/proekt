@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import type { IAnimal } from '../animals';
+import {
+  IMAGE_UPLOAD_TOO_LARGE_MESSAGE,
+  MAX_IMAGE_UPLOAD_SIZE_BYTES
+} from '../constants/upload';
+import {
+  ADMIN_SESSION_EXPIRED_MESSAGE,
+  createApiRequestError,
+  getApiRequestErrorMessage,
+  isAdminSessionExpiredError
+} from '../utils/apiErrors';
 import { apiUrl } from '../utils/api';
 import { createAuthHeaders } from '../utils/auth';
 import { fetchWithRetry } from '../utils/fetchWithRetry';
@@ -15,13 +25,15 @@ interface UseGalleryParams {
   isAuthenticated: boolean;
   onAnimalMetaUpdate: (meta: GalleryMetaUpdate) => void;
   refreshMapData: () => void | Promise<void>;
+  onAuthorizationExpired: () => void;
 }
 
 export const useGallery = ({
   selectedAnimal,
   isAuthenticated,
   onAnimalMetaUpdate,
-  refreshMapData
+  refreshMapData,
+  onAuthorizationExpired
 }: UseGalleryParams) => {
   const [galleryUploadFiles, setGalleryUploadFiles] = useState<File[]>([]);
   const [galleryUploadError, setGalleryUploadError] = useState<string | null>(null);
@@ -71,6 +83,12 @@ export const useGallery = ({
       return;
     }
 
+    const hasOversizedFile = galleryUploadFiles.some((file) => file.size > MAX_IMAGE_UPLOAD_SIZE_BYTES);
+    if (hasOversizedFile) {
+      setGalleryUploadError(IMAGE_UPLOAD_TOO_LARGE_MESSAGE);
+      return;
+    }
+
     setGalleryUploadError(null);
     setIsGalleryUploading(true);
 
@@ -83,7 +101,7 @@ export const useGallery = ({
         body: form
       });
       if (!res.ok) {
-        throw new Error('upload_failed');
+        throw await createApiRequestError(res, 'Ошибка загрузки фото.');
       }
 
       const data = await res.json();
@@ -95,12 +113,25 @@ export const useGallery = ({
       setGalleryUploadFiles([]);
       await fetchGalleryImages(selectedAnimal.id);
       await refreshMapData();
-    } catch {
-      setGalleryUploadError('Ошибка загрузки фото.');
+    } catch (error) {
+      if (isAdminSessionExpiredError(error)) {
+        onAuthorizationExpired();
+        setGalleryUploadError(ADMIN_SESSION_EXPIRED_MESSAGE);
+      } else {
+        setGalleryUploadError(getApiRequestErrorMessage(error, 'Ошибка загрузки фото.'));
+      }
     } finally {
       setIsGalleryUploading(false);
     }
-  }, [fetchGalleryImages, galleryUploadFiles, isAuthenticated, onAnimalMetaUpdate, refreshMapData, selectedAnimal]);
+  }, [
+    fetchGalleryImages,
+    galleryUploadFiles,
+    isAuthenticated,
+    onAnimalMetaUpdate,
+    onAuthorizationExpired,
+    refreshMapData,
+    selectedAnimal
+  ]);
 
   const handleDeleteGalleryPhoto = useCallback(async (fileName: string) => {
     if (!selectedAnimal) return;
@@ -118,7 +149,7 @@ export const useGallery = ({
         { method: 'DELETE', headers: createAuthHeaders() }
       );
       if (!res.ok) {
-        throw new Error('delete_failed');
+        throw await createApiRequestError(res, 'Ошибка удаления фото.');
       }
 
       const data = await res.json();
@@ -128,10 +159,14 @@ export const useGallery = ({
       });
       await fetchGalleryImages(selectedAnimal.id);
       await refreshMapData();
-    } catch {
-      toast.error('Ошибка удаления фото.');
+    } catch (error) {
+      if (isAdminSessionExpiredError(error)) {
+        onAuthorizationExpired();
+      } else {
+        toast.error(getApiRequestErrorMessage(error, 'Ошибка удаления фото.'));
+      }
     }
-  }, [fetchGalleryImages, isAuthenticated, onAnimalMetaUpdate, refreshMapData, selectedAnimal]);
+  }, [fetchGalleryImages, isAuthenticated, onAnimalMetaUpdate, onAuthorizationExpired, refreshMapData, selectedAnimal]);
 
   return {
     galleryUploadFiles,

@@ -16,16 +16,16 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('UI runtime error:', error, errorInfo);
+    console.error('Ошибка интерфейса:', error, errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
       return (
         <div className="app-error-fallback" role="alert">
-          <h2>Something went wrong</h2>
-          <p>An unexpected UI error has occurred.</p>
-          <button onClick={() => window.location.reload()}>Reload page</button>
+          <h2>Что-то пошло не так</h2>
+          <p>Произошла непредвиденная ошибка интерфейса.</p>
+          <button onClick={() => window.location.reload()}>Перезагрузить страницу</button>
         </div>
       );
     }

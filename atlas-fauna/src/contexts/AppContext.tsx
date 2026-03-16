@@ -50,7 +50,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 export function useAppContext() {
   const context = useContext(AppContext);
   if (!context) {
-    throw new Error('useAppContext must be used within AppProvider');
+    throw new Error('useAppContext должен вызываться внутри AppProvider');
   }
   return context;
 }

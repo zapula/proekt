@@ -1,9 +1,11 @@
 import { memo, type ChangeEvent, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import { toast } from 'react-hot-toast';
 import type { ISpecies } from './animals';
+import {
+  IMAGE_UPLOAD_TOO_LARGE_MESSAGE,
+  MAX_IMAGE_UPLOAD_SIZE_BYTES
+} from './constants/upload';
 import type { NewSpeciesForm } from './types';
-
-const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 
 interface AdminPanelProps {
   placeLocationCoords: number[] | null;
@@ -52,8 +54,8 @@ function AdminPanel({
 }: AdminPanelProps) {
   const handleIconFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] || null;
-    if (file && file.size > MAX_UPLOAD_SIZE_BYTES) {
-      toast.error('Файл слишком большой (макс. 200MB)');
+    if (file && file.size > MAX_IMAGE_UPLOAD_SIZE_BYTES) {
+      toast.error(IMAGE_UPLOAD_TOO_LARGE_MESSAGE);
       setIconFile(null);
       event.target.value = '';
       return;
@@ -63,9 +65,9 @@ function AdminPanel({
 
   const handlePhotoFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
-    const hasOversizedFile = files.some((file) => file.size > MAX_UPLOAD_SIZE_BYTES);
+    const hasOversizedFile = files.some((file) => file.size > MAX_IMAGE_UPLOAD_SIZE_BYTES);
     if (hasOversizedFile) {
-      toast.error('Файл слишком большой (макс. 200MB)');
+      toast.error(IMAGE_UPLOAD_TOO_LARGE_MESSAGE);
       setPhotoFiles([]);
       event.target.value = '';
       return;
@@ -200,9 +202,9 @@ function AdminPanel({
                 }}
                 style={{ padding: 8 }}
               />
-              <label style={{ fontSize: 12, color: '#666' }}>Иконка (PNG или SVG)</label>
+              <label style={{ fontSize: 12, color: '#666' }}>Иконка (PNG или SVG, до 2 МБ)</label>
               <input type="file" accept="image/png,image/svg+xml" required onChange={handleIconFileChange} />
-              <label style={{ fontSize: 12, color: '#666' }}>Фото (можно несколько)</label>
+              <label style={{ fontSize: 12, color: '#666' }}>Фото (можно несколько, до 2 МБ каждое)</label>
               <input type="file" accept="image/*" multiple onChange={handlePhotoFilesChange} />
               {photoFiles.length > 0 && <div style={{ fontSize: 12, color: '#666' }}>Выбрано фото: {photoFiles.length}</div>}
               {speciesFormError && (
@@ -222,6 +224,3 @@ function AdminPanel({
 }
 
 export default memo(AdminPanel);
-
-
-
